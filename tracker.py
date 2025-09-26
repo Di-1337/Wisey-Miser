@@ -1,55 +1,56 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
+import requests
+from bs4 import BeautifulSoup
 import pandas as pd
-from datetime import datetime
 import matplotlib.pyplot as plt
-import time
+from datetime import datetime
+import os
 
-products = {
-    "Top1": "https://www.myntra.com/35035821",
-    "Top2": "https://www.myntra.com/35662540"
-}
+# Example product
+url = "https://www.myntra.com/tops/some-top-id"
+product_name = "Top 1"
 
-data = []
+csv_file = f"{product_name.replace(' ', '_')}.csv"
 
-# Setup Chrome
-driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+# --- scrape the price ---
+headers = {"User-Agent": "Mozilla/5.0"}
+response = requests.get(url, headers=headers)
+soup = BeautifulSoup(response.text, "html.parser")
 
-for name, url in products.items():
-    driver.get(url)
-    time.sleep(5)  # wait for page to load
-    
-    try:
-        # Myntra price element (check page, might need update)
-        price_tag = driver.find_element(By.CLASS_NAME, "pdp-price")
-        price = int(price_tag.text.strip().replace("₹","").replace(",",""))
-        data.append([datetime.now().date(), name, price])
-        print(name, price)
-    except:
-        print("Price not found for", name)
+# adapt this selector depending on Myntra’s structure
+price_tag = soup.find("span", {"class": "pdp-price"})  
+price = None
+if price_tag:
+    price = price_tag.get_text(strip=True).replace("Rs. ", "").replace(",", "")
+    price = int(price)
 
-driver.quit()
+# --- log with date ---
+today = datetime.today().strftime("%Y-%m-%d")
 
-# Save to CSV
-df = pd.DataFrame(data, columns=["Date", "Product", "Price"])
-try:
-    old_df = pd.read_csv("price_data.csv")
-    df = pd.concat([old_df, df], ignore_index=True)
-except FileNotFoundError:
-    pass
+# if CSV exists, load it
+if os.path.exists(csv_file):
+    df = pd.read_csv(csv_file)
+else:
+    df = pd.DataFrame(columns=["Date", "Price"])
 
-df.to_csv("price_data.csv", index=False)
+# add today’s entry if not already there
+if today not in df["Date"].values:
+    df = pd.concat([df, pd.DataFrame([[today, price]], columns=["Date", "Price"])])
+    df.to_csv(csv_file, index=False)
 
-# Plot price trends
-for product in products.keys():
-    product_data = df[df["Product"] == product]
-    plt.plot(product_data["Date"], product_data["Price"], marker="o", label=product)
+print("Logged:", today, price)
+
+# --- plot graph ---
+df["Date"] = pd.to_datetime(df["Date"])
+plt.figure(figsize=(8, 5))
+plt.plot(df["Date"], df["Price"], marker="o", linestyle="-", label=product_name)
+
+# annotate prices
+for i, row in df.iterrows():
+    plt.text(row["Date"], row["Price"], str(row["Price"]), ha="center", va="bottom")
 
 plt.xlabel("Date")
-plt.ylabel("Price (₹)")
-plt.title("Price Tracker")
+plt.ylabel("Price (Rs.)")
+plt.title(f"Price Tracker for {product_name}")
 plt.legend()
-plt.xticks(rotation=45)
+plt.grid(True)
 plt.show()
